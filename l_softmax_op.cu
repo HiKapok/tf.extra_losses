@@ -43,7 +43,7 @@ static __device__ int32_t cuda_factorial(int32_t n){
 template <typename T>
 __global__ void LargeMarginSoftmaxCudaKernel(CudaLaunchConfig config, const T * features, const T * weights, const int32_t * global_step, const int32_t * labels,
     const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions,
-    const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order,
+    const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order, const bool b_angular,
     float * feat_norm, float * weights_norm, float * cos_theta, float * theta_seg, float * output_lambda, T * losses) {
 
     *output_lambda = tf_max(base * std::pow(1.f + gamma * global_step[0], -power), lambda_min);//999.1242;//
@@ -62,7 +62,7 @@ __global__ void LargeMarginSoftmaxCudaKernel(CudaLaunchConfig config, const T * 
         for(int32_t dim_ind = 0;dim_ind < num_dimensions;++dim_ind){
             temp_sum += ldg(weights_along + dim_ind) * ldg(weights_along + dim_ind);
         }
-        weights_norm[index] = std::pow(static_cast<float>(temp_sum), .5);
+        weights_norm[index] = b_angular ? 1. : std::pow(static_cast<float>(temp_sum), .5);
     }
     for(int32_t index = 0;index < margin_order;++index){
         theta_seg[index] = std::cos(_PI * index / margin_order);
@@ -108,7 +108,7 @@ __global__ void LargeMarginSoftmaxCudaKernel(CudaLaunchConfig config, const T * 
 template <typename T>
 void LargeMarginSoftmaxFunctor<GPUDevice, T>::operator()(OpKernelContext* context, const GPUDevice& d, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<int32_t>::ConstFlat global_step, typename TTypes<int32_t>::ConstFlat labels,
         const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions,
-        const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order,
+        const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order, const bool b_angular,
         typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
         typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
         typename TTypes<float>::Flat output_lambda, typename TTypes<T>::Flat losses) {
@@ -116,7 +116,7 @@ void LargeMarginSoftmaxFunctor<GPUDevice, T>::operator()(OpKernelContext* contex
     CudaLaunchConfig config = GetCudaLaunchConfig(batch_size * output_dimensions, d);
     LargeMarginSoftmaxCudaKernel <<<config.block_count,
                         config.thread_per_block, 0, d.stream()>>> (config, features.data(), weights.data(), global_step.data(), labels.data(),
-                            batch_size, num_dimensions, output_dimensions, base, gamma, power, lambda_min, margin_order,
+                            batch_size, num_dimensions, output_dimensions, base, gamma, power, lambda_min, margin_order, b_angular,
                             feat_norm.data(), weights_norm.data(), cos_theta.data(), theta_seg.data(), output_lambda.data(), losses.data());
 
     cudaError_t err = cudaGetLastError();

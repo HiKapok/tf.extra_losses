@@ -59,12 +59,36 @@ REGISTER_OP("LargeMarginSoftmaxGrad")
       return Status::OK();
     });
 
+REGISTER_OP("AngularSoftmaxGrad")
+    .Attr("T: {float}")
+    .Attr("margin_order: int")
+    .Input("features: T")
+    .Input("weights: T")
+    .Input("labels: int32")
+    .Input("back_grads: T")
+    .Input("cur_lambda: float")
+    .Output("grads_features: T")
+    .Output("grads_weights: T")
+    .Doc(R"doc(
+        AngularSoftmaxGrad is the Gradient op of AngularSoftmax.
+        The input features should has shape [N, D], where D is the dimension of the input features, N is the number of the input samples.
+        The input weights should has shape [M, D], where D is the same as the second dimension of input features, while M is the outputs dimensions.
+        The input labels should has shape [N].
+        The input back_grads should in shape [N, M].
+        The input cur_lambda should be one scalar.
+        )doc")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      c->set_output(1, c->input(1));
+      return Status::OK();
+    });
+
 // CPU specialization of actual computation.
 //template <typename T>
 template <typename T>
 struct LargeMarginSoftmaxGradFunctor<CPUDevice, T> {
   void operator()(OpKernelContext* context, const CPUDevice& d, typename TTypes<T>::ConstFlat back_grads, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<float>::ConstFlat cur_lambda, typename TTypes<int32_t>::ConstFlat labels,
-        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order,
+        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order, const bool b_angular,
         typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
         typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
         typename TTypes<T>::Flat grad_features, typename TTypes<T>::Flat grad_weights) {
@@ -84,12 +108,11 @@ struct LargeMarginSoftmaxGradFunctor<CPUDevice, T> {
         for(int32_t dim_ind = 0;dim_ind < num_dimensions;++dim_ind){
             temp_sum += weights_along[dim_ind] * weights_along[dim_ind];
         }
-        p_weights_norm[index] = std::pow(static_cast<float>(temp_sum), .5);
+        p_weights_norm[index] = b_angular ? 1. : std::pow(static_cast<float>(temp_sum), .5);
     }
     float *p_theta_seg = theta_seg.data();
     for(int32_t index = 0;index < margin_order;++index){
         p_theta_seg[index] = std::cos(_PI * index / margin_order);
-        //std::cout << p_theta_seg[index] << " " << std::endl;
     }
     p_theta_seg[margin_order] = -1.;
 
@@ -112,7 +135,7 @@ struct LargeMarginSoftmaxGradFunctor<CPUDevice, T> {
       }
     };
 
-    auto get_loss_routine = [&back_grads, &features, &weights, &labels, &feat_norm, &weights_norm, &cos_theta, &theta_seg, &cur_lambda, &grad_features, &grad_weights, batch_size, num_dimensions, output_dimensions, margin_order](int64_t start, int64_t limit){
+    auto get_loss_routine = [&back_grads, &features, &weights, &labels, &feat_norm, &weights_norm, &cos_theta, &theta_seg, &cur_lambda, &grad_features, &grad_weights, batch_size, num_dimensions, output_dimensions, margin_order, b_angular](int64_t start, int64_t limit){
 
       for (int64_t worker_index = start; worker_index < limit; ++worker_index){
         const int32_t output_row = worker_index / output_dimensions;
@@ -165,14 +188,18 @@ struct LargeMarginSoftmaxGradFunctor<CPUDevice, T> {
           for(int32_t dim_ind = 0; dim_ind < num_dimensions; ++dim_ind){
             float wx_norm = feat_norm_value * p_weights_norm[output_col];
 
-            float grad_cos_n_theta_by_w = grad_of_cos_theta / (feat_norm_value * std::pow(p_weights_norm[output_col], 2.)) *
+            //
+            float grad_cos_n_theta_by_w = b_angular ? grad_of_cos_theta * feat_start[dim_ind] / feat_norm_value : grad_of_cos_theta / (feat_norm_value * std::pow(p_weights_norm[output_col], 2.)) *
                                           ( (feat_start[dim_ind] * p_weights_norm[output_col]) -
                                             (wx_norm * single_cos * weights_start[dim_ind] / p_weights_norm[output_col])
                                           );
-
-            atomic_float_add(grad_weights_start + dim_ind, input_grad * feat_norm_value/(cur_lambda.data()[0] + 1.) * (
-                                          cos_n_theta * weights_start[dim_ind] / p_weights_norm[output_col] +
-                                          grad_cos_n_theta_by_w * p_weights_norm[output_col]       ) );
+            if(b_angular){
+              atomic_float_add(grad_weights_start + dim_ind, input_grad * feat_norm_value/(cur_lambda.data()[0] + 1.) *grad_cos_n_theta_by_w );
+            }else{
+              atomic_float_add(grad_weights_start + dim_ind, input_grad * feat_norm_value/(cur_lambda.data()[0] + 1.) * (
+                                            cos_n_theta * weights_start[dim_ind] / p_weights_norm[output_col] +
+                                            grad_cos_n_theta_by_w * p_weights_norm[output_col]       ) );
+            }
 
             float grad_cos_n_theta_by_x = grad_of_cos_theta / (p_weights_norm[output_col] * std::pow(feat_norm_value, 2.)) *
                                           ( (weights_start[dim_ind] * feat_norm_value) -
@@ -199,6 +226,8 @@ template <typename Device, typename T>
 class LargeMarginSoftmaxGradOp : public OpKernel {
  public:
   explicit LargeMarginSoftmaxGradOp(OpKernelConstruction* context) : OpKernel(context) {
+    b_angular = StringPiece(type_string()).starts_with("Angular");
+
     OP_REQUIRES_OK(context, context->GetAttr("margin_order", &m_margin_order));
     OP_REQUIRES(context, m_margin_order > 0, errors::InvalidArgument("Need Attr margin_order >= 1, got ", m_margin_order));
   }
@@ -215,7 +244,6 @@ class LargeMarginSoftmaxGradOp : public OpKernel {
     OP_REQUIRES(context, features_in.dim_size(1) == weights_in.dim_size(1), errors::InvalidArgument("both input features and weights shoule have the same length in second dimension."));
     OP_REQUIRES(context, grads_in.dim_size(1) == weights_in.dim_size(0) && grads_in.dim_size(0) == features_in.dim_size(0), errors::InvalidArgument("input grads must have shape [N, M]."));
     OP_REQUIRES(context, lables_in.shape().dims() == 1 && lables_in.dim_size(0) == features_in.dim_size(0), errors::InvalidArgument("input lables must have shape [N]."));
-    //std::cout << cur_lambda.shape().dims() << std::endl;
     OP_REQUIRES(context, TensorShapeUtils::IsScalar(cur_lambda.shape()), errors::InvalidArgument("the input cur_lambda should be one scalar."));
 
     const int32_t batch_size = features_in.dim_size(0);
@@ -239,7 +267,7 @@ class LargeMarginSoftmaxGradOp : public OpKernel {
                                         grads_in.template flat<T>(),
                                         features_in.template flat<T>(), weights_in.template flat<T>(),
                                         cur_lambda.template flat<float>(), lables_in.template flat<int32_t>(),
-                                        batch_size, num_dimensions, output_dimensions, m_margin_order,
+                                        batch_size, num_dimensions, output_dimensions, m_margin_order, b_angular,
                                         feat_norm.template flat<float>(), weights_norm.template flat<float>(),
                                         cos_theta.template flat<float>(), theta_seg.template flat<float>(),
                                         grad_features->template flat<T>(), grad_weights->template flat<T>());
@@ -251,6 +279,7 @@ private:
   float m_gamma;
   float m_power;
   float m_lambda_min;
+  bool b_angular;
   //PersistentTensor cos_theta_lookup;
 };
 
@@ -258,6 +287,12 @@ private:
 #define REGISTER_CPU(T)                                          \
   REGISTER_KERNEL_BUILDER(                                       \
       Name("LargeMarginSoftmaxGrad").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
+      LargeMarginSoftmaxGradOp<CPUDevice, T>);
+REGISTER_CPU(float);
+
+#define REGISTER_CPU(T)                                          \
+  REGISTER_KERNEL_BUILDER(                                       \
+      Name("AngularSoftmaxGrad").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
       LargeMarginSoftmaxGradOp<CPUDevice, T>);
 REGISTER_CPU(float);
 
@@ -269,6 +304,12 @@ REGISTER_CPU(float);
 #define REGISTER_GPU(T)                                          \
   REGISTER_KERNEL_BUILDER(                                       \
       Name("LargeMarginSoftmaxGrad").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
+      LargeMarginSoftmaxGradOp<GPUDevice, T>);
+REGISTER_GPU(float);
+
+#define REGISTER_GPU(T)                                          \
+  REGISTER_KERNEL_BUILDER(                                       \
+      Name("AngularSoftmaxGrad").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
       LargeMarginSoftmaxGradOp<GPUDevice, T>);
 REGISTER_GPU(float);
 #endif  // GOOGLE_CUDA

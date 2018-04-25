@@ -41,7 +41,7 @@ static __device__ int32_t cuda_factorial(int32_t n){
 // Define the CUDA kernel.
 template <typename T>
 __global__ void LargeMarginSoftmaxGradCudaKernel(CudaLaunchConfig config, const T * back_grads, const T * features, const T * weights, const float * cur_lambda, const int32_t * labels,
-    const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order,
+    const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order, const bool b_angular,
     float * feat_norm, float * weights_norm, float * cos_theta, float * theta_seg, T * grad_features, T * grad_weights) {
 
     for(int32_t index = 0;index < batch_size;++index){
@@ -58,7 +58,7 @@ __global__ void LargeMarginSoftmaxGradCudaKernel(CudaLaunchConfig config, const 
         for(int32_t dim_ind = 0;dim_ind < num_dimensions;++dim_ind){
             temp_sum += ldg(weights_along + dim_ind) * ldg(weights_along + dim_ind);
         }
-        weights_norm[index] = std::pow(static_cast<float>(temp_sum), .5);
+        weights_norm[index] = b_angular ? 1. : std::pow(static_cast<float>(temp_sum), .5);
     }
     for(int32_t index = 0;index < margin_order;++index){
         theta_seg[index] = std::cos(_PI * index / margin_order);
@@ -125,14 +125,17 @@ __global__ void LargeMarginSoftmaxGradCudaKernel(CudaLaunchConfig config, const 
           for(int32_t dim_ind = 0; dim_ind < num_dimensions; ++dim_ind){
             float wx_norm = feat_norm_value * weights_norm[output_col];
 
-            float grad_cos_n_theta_by_w = grad_of_cos_theta / (feat_norm_value * weights_norm[output_col] * weights_norm[output_col]) *
+            float grad_cos_n_theta_by_w = b_angular ? grad_of_cos_theta * feat_start[dim_ind] / feat_norm_value : grad_of_cos_theta / (feat_norm_value * weights_norm[output_col] * weights_norm[output_col]) *
                                           ( (ldg(feat_start+dim_ind) * weights_norm[output_col]) -
                                             (wx_norm * single_cos * ldg(weights_start+dim_ind) / weights_norm[output_col])
                                           );
-
-            atomicAdd(grad_weights_start + dim_ind, input_grad * feat_norm_value/(ldg(cur_lambda) + 1.) * (
+            if(b_angular){
+                atomicAdd(grad_weights_start + dim_ind, input_grad * feat_norm_value/(ldg(cur_lambda) + 1.) *grad_cos_n_theta_by_w );
+            }else{
+                atomicAdd(grad_weights_start + dim_ind, input_grad * feat_norm_value/(ldg(cur_lambda) + 1.) * (
                                           cos_n_theta * ldg(weights_start+dim_ind) / weights_norm[output_col] +
                                           grad_cos_n_theta_by_w * weights_norm[output_col]       ) );
+            }
 
             float grad_cos_n_theta_by_x = grad_of_cos_theta / (weights_norm[output_col] * feat_norm_value * feat_norm_value) *
                                           ( (ldg(weights_start+dim_ind) * feat_norm_value) -
@@ -150,7 +153,7 @@ __global__ void LargeMarginSoftmaxGradCudaKernel(CudaLaunchConfig config, const 
 
 template <typename T>
 void LargeMarginSoftmaxGradFunctor<GPUDevice, T>::operator()(OpKernelContext* context, const GPUDevice& d, typename TTypes<T>::ConstFlat back_grads, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<float>::ConstFlat cur_lambda, typename TTypes<int32_t>::ConstFlat labels,
-        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order,
+        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order, const bool b_angular,
         typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
         typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
         typename TTypes<T>::Flat grad_features, typename TTypes<T>::Flat grad_weights) {
@@ -163,7 +166,7 @@ void LargeMarginSoftmaxGradFunctor<GPUDevice, T>::operator()(OpKernelContext* co
     config = GetCudaLaunchConfig(batch_size * output_dimensions, d);
     LargeMarginSoftmaxGradCudaKernel <<<config.block_count,
                         config.thread_per_block, 0, d.stream()>>> (config, back_grads.data(), features.data(), weights.data(), cur_lambda.data(), labels.data(),
-                            batch_size, num_dimensions, output_dimensions, margin_order,
+                            batch_size, num_dimensions, output_dimensions, margin_order, b_angular,
                             feat_norm.data(), weights_norm.data(), cos_theta.data(), theta_seg.data(), grad_features.data(), grad_weights.data());
 
     cudaError_t err = cudaGetLastError();

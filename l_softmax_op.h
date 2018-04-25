@@ -43,7 +43,7 @@ template <typename Device, typename T>
 struct LargeMarginSoftmaxFunctor {
   void operator()(OpKernelContext* context, const Device& d, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<int32_t>::ConstFlat global_step, typename TTypes<int32_t>::ConstFlat labels,
         const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions,
-        const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order,
+        const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order, const bool b_angular,
         typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
         typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
         typename TTypes<float>::Flat output_lambda, typename TTypes<T>::Flat losses);
@@ -52,7 +52,7 @@ struct LargeMarginSoftmaxFunctor {
 template <typename Device, typename T>
 struct LargeMarginSoftmaxGradFunctor {
   void operator()(OpKernelContext* context, const Device& d, typename TTypes<T>::ConstFlat back_grads, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<float>::ConstFlat cur_lambda, typename TTypes<int32_t>::ConstFlat labels,
-        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order,
+        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order, const bool b_angular,
         typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
         typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
         typename TTypes<T>::Flat grad_features, typename TTypes<T>::Flat grad_weights);
@@ -63,7 +63,7 @@ template <typename T>
 struct LargeMarginSoftmaxFunctor<GPUDevice, T> {
   void operator()(OpKernelContext* context, const GPUDevice& d, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<int32_t>::ConstFlat global_step, typename TTypes<int32_t>::ConstFlat labels,
         const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions,
-        const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order,
+        const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order, const bool b_angular,
         typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
         typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
         typename TTypes<float>::Flat output_lambda, typename TTypes<T>::Flat losses);
@@ -74,7 +74,7 @@ struct LargeMarginSoftmaxFunctor<GPUDevice, T> {
 template <typename T>
 struct LargeMarginSoftmaxGradFunctor<GPUDevice, T> {
   void operator()(OpKernelContext* context, const GPUDevice& d, typename TTypes<T>::ConstFlat back_grads, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<float>::ConstFlat cur_lambda, typename TTypes<int32_t>::ConstFlat labels,
-        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order,
+        const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions, const int32_t margin_order, const bool b_angular,
         typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
         typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
         typename TTypes<T>::Flat grad_features, typename TTypes<T>::Flat grad_weights);

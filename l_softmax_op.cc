@@ -67,13 +67,44 @@ REGISTER_OP("LargeMarginSoftmax")
       return Status::OK();
     });
 
+REGISTER_OP("AngularSoftmax")
+    .Attr("T: {float}")
+    .Attr("margin_order: int")
+    .Attr("base: float")
+    .Attr("gamma: float")
+    .Attr("power: float")
+    .Attr("lambda_min: float")
+    .Input("features: T")
+    .Input("weights: T")
+    .Input("labels: int32")
+    .Input("global_step: int32")
+    .Output("loss: T")
+    .Output("cur_lambda: float")
+    .Doc(R"doc(
+        angular_softmax is an improved version of large-margin softmax (L-Softmax) loss which explicitly encourages intra-class compactness and inter-class separability between learned features.
+        The input features should has shape [N, D], where D is the dimension of the input features, N is the number of the input samples.
+        The input weights should has shape [M, D], where D is the same as the second dimension of input features, while M is the outputs dimensions.
+        The input labels should has shape [N].
+        The base, gamma, power and lambda_min are parameters of exponential lambda descent: cur_lambda = base * pow(1. + gamma * global_step, -power).
+        )doc")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle features_shape = c->input(0);
+      shape_inference::DimensionHandle num_per_batch = c->Dim(features_shape, 0);
+      shape_inference::DimensionHandle num_dimensions = c->Dim(features_shape, 1);
+      shape_inference::DimensionHandle output_dimensions = c->Dim(c->input(1), 0);
+      c->set_output(0, c->MakeShape({num_per_batch, output_dimensions}));
+      // scalar output for lambda
+      c->set_output(1, c->MakeShape({1}));
+      return Status::OK();
+    });
+
 // CPU specialization of actual computation.
 //template <typename T>
 template <typename T>
 struct LargeMarginSoftmaxFunctor<CPUDevice, T> {
   void operator()(OpKernelContext* context, const CPUDevice& d, typename TTypes<T>::ConstFlat features, typename TTypes<T>::ConstFlat weights, typename TTypes<int32_t>::ConstFlat global_step, typename TTypes<int32_t>::ConstFlat labels,
                   const int32_t batch_size, const int32_t num_dimensions, const int32_t output_dimensions,
-                  const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order,
+                  const float base, const float gamma, const float power, const float lambda_min, const int32_t margin_order, const bool b_angular,
                   typename TTypes<float>::Flat feat_norm, typename TTypes<float>::Flat weights_norm,
                   typename TTypes<float>::Flat cos_theta, typename TTypes<float>::Flat theta_seg,
                   typename TTypes<float>::Flat output_lambda, typename TTypes<T>::Flat losses) {
@@ -89,6 +120,7 @@ struct LargeMarginSoftmaxFunctor<CPUDevice, T> {
         }
         p_feat_norm[index] = std::pow(static_cast<float>(temp_sum), .5);
     }
+
     float *p_weights_norm = weights_norm.data();
     for(int32_t index = 0;index < output_dimensions;++index){
         T temp_sum{0};
@@ -96,7 +128,7 @@ struct LargeMarginSoftmaxFunctor<CPUDevice, T> {
         for(int32_t dim_ind = 0;dim_ind < num_dimensions;++dim_ind){
             temp_sum += weights_along[dim_ind] * weights_along[dim_ind];
         }
-        p_weights_norm[index] = std::pow(static_cast<float>(temp_sum), .5);
+        p_weights_norm[index] = b_angular ? 1. : std::pow(static_cast<float>(temp_sum), .5);
     }
     float *p_theta_seg = theta_seg.data();
     for(int32_t index = 0;index < margin_order;++index){
@@ -118,6 +150,7 @@ struct LargeMarginSoftmaxFunctor<CPUDevice, T> {
         }
 
         *(cos_theta.data() + worker_index) = static_cast<float>(inner_dot) / (feat_norm.data()[output_row] * weights_norm.data()[output_col]);
+        //std::cout << *(cos_theta.data() + worker_index) << " " << std::endl;
       }
     };
 
@@ -140,6 +173,7 @@ struct LargeMarginSoftmaxFunctor<CPUDevice, T> {
         }
         float single_cos = p_cos_theta[output_col];
         float cos_n_theta = std::pow(single_cos, margin_order*1.);
+
         float sin2_theta = 1. - single_cos * single_cos;
         for(int32_t m = 1;m <= margin_order/2;++m){
           cos_n_theta += std::pow(-1, m) * std::pow(sin2_theta, m * 1.) * std::pow(single_cos, margin_order - 2.*m) * _factorial(margin_order)/(_factorial(2*m)*_factorial(margin_order-2*m)*1.);
@@ -162,6 +196,8 @@ template <typename Device, typename T>
 class LargeMarginSoftmaxOp : public OpKernel {
  public:
   explicit LargeMarginSoftmaxOp(OpKernelConstruction* context) : OpKernel(context) {
+    b_angular = StringPiece(type_string()).starts_with("Angular");
+
     OP_REQUIRES_OK(context, context->GetAttr("margin_order", &m_margin_order));
     OP_REQUIRES(context, m_margin_order > 0, errors::InvalidArgument("Need Attr margin_order >= 1, got ", m_margin_order));
 
@@ -212,7 +248,7 @@ class LargeMarginSoftmaxOp : public OpKernel {
     LargeMarginSoftmaxFunctor<Device, T>()(context, context->eigen_device<Device>(),
                                         features_in.template flat<T>(), weights_in.template flat<T>(),
                                         global_step_in.template flat<int32_t>(), lables_in.template flat<int32_t>(),
-                                        batch_size, num_dimensions, output_dimensions, m_base, m_gamma, m_power, m_lambda_min, m_margin_order,
+                                        batch_size, num_dimensions, output_dimensions, m_base, m_gamma, m_power, m_lambda_min, m_margin_order, b_angular,
                                         feat_norm.template flat<float>(), weights_norm.template flat<float>(),
                                         cos_theta.template flat<float>(), theta_seg.template flat<float>(),
                                         output_lambda->template flat<float>(), losses->template flat<T>());
@@ -224,6 +260,7 @@ private:
   float m_gamma;
   float m_power;
   float m_lambda_min;
+  bool b_angular;
   //PersistentTensor cos_theta_lookup;
 };
 
@@ -231,6 +268,12 @@ private:
 #define REGISTER_CPU(T)                                          \
   REGISTER_KERNEL_BUILDER(                                       \
       Name("LargeMarginSoftmax").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
+      LargeMarginSoftmaxOp<CPUDevice, T>);
+REGISTER_CPU(float);
+
+#define REGISTER_CPU(T)                                          \
+  REGISTER_KERNEL_BUILDER(                                       \
+      Name("AngularSoftmax").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
       LargeMarginSoftmaxOp<CPUDevice, T>);
 REGISTER_CPU(float);
 
@@ -242,6 +285,12 @@ REGISTER_CPU(float);
 #define REGISTER_GPU(T)                                          \
   REGISTER_KERNEL_BUILDER(                                       \
       Name("LargeMarginSoftmax").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
+      LargeMarginSoftmaxOp<GPUDevice, T>);
+REGISTER_GPU(float);
+
+#define REGISTER_GPU(T)                                          \
+  REGISTER_KERNEL_BUILDER(                                       \
+      Name("AngularSoftmax").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
       LargeMarginSoftmaxOp<GPUDevice, T>);
 REGISTER_GPU(float);
 #endif  // GOOGLE_CUDA
