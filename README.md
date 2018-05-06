@@ -1,14 +1,23 @@
-# Large-Margin Softmax Loss and Angular Softmax Loss In Tensorflow C++ API
+# Large-Margin Softmax Loss, Angular Softmax Loss, Additive Margin Softmax, ArcFaceLoss And FocalLoss In Tensorflow
 
-This repository contains codes of the reimplementation of [Large-Margin Softmax Loss for Convolutional Neural Networks](https://arxiv.org/abs/1612.02295) and [SphereFace: Deep Hypersphere Embedding for Face Recognition](https://arxiv.org/abs/1704.08063) in TensorFlow. 
+This repository contains core codes of the reimplementation of the following papers in TensorFlow:
+
+- [Large-Margin Softmax Loss for Convolutional Neural Networks](https://arxiv.org/abs/1612.02295)
+- [SphereFace: Deep Hypersphere Embedding for Face Recognition](https://arxiv.org/abs/1704.08063)
+- [Additive Margin Softmax for Face Verification](https://arxiv.org/abs/1801.05599) or [CosFace: Large Margin Cosine Loss for Deep Face Recognition](https://arxiv.org/abs/1801.09414)
+- [ArcFace: Additive Angular Margin Loss for Deep Face Recognition](https://arxiv.org/abs/1801.07698)
+- [Focal Loss for Dense Object Detection](https://arxiv.org/abs/1708.02002)
 
 If your goal is to reproduce the results in the original paper, please use the official codes:
 
 - [Large Margin Softmax Loss in ICML 2016](https://github.com/wy1iu/LargeMargin_Softmax_Loss)
 - [Angular Softmax Loss in CVPR 2017](https://github.com/wy1iu/sphereface)
+- [Additive Margin Softmax](https://github.com/happynear/AMSoftmax)
+- [ArcFace: Additive Angular Margin Loss](https://github.com/deepinsight/insightface)
+- [Focal Loss in ICCV 2017](https://github.com/facebookresearch/Detectron)
 
 ## ##
-For using this op in your own machine:
+For using these Ops on your own machine:
 
 - copy the header file "cuda\_config.h" from "your\_python\_path/site-packages/external/local\_config\_cuda/cuda/cuda/cuda\_config.h" to "your\_python\_path/site-packages/tensorflow/include/tensorflow/stream\_executor/cuda/cuda\_config.h".
 
@@ -70,8 +79,9 @@ make
 	result = angular_softmax(features, normed_var_weights, labels, global_step, 4, 1000., 0.000025, 35., 0.)
 	loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=result[0]))
 	```
+	- For others just refer to this [script](https://github.com/HiKapok/tf.extra_losses/blob/master/py_loss.py).
 
-All the codes was tested under TensorFlow 1.6, Python 3.5, Ubuntu 16.04 with CUDA 8.0. The outputs of this Op had been compared with the original caffe codes' outputs, and the bias could be ignored. The gradients of this Op had been checked using [tf.test.compute\_gradient\_error](https://www.tensorflow.org/api_docs/python/tf/test/compute_gradient_error) and [tf.test.compute\_gradient](https://www.tensorflow.org/api_docs/python/tf/test/compute_gradient).
+All the codes was tested under TensorFlow 1.6, Python 3.5, Ubuntu 16.04 with CUDA 8.0. The outputs of these Ops in C++ had been compared with the original caffe codes' outputs, and the bias could be ignored. The gradients of this Op had been checked using [tf.test.compute\_gradient\_error](https://www.tensorflow.org/api_docs/python/tf/test/compute_gradient_error) and [tf.test.compute\_gradient](https://www.tensorflow.org/api_docs/python/tf/test/compute_gradient). While the others are implemented following the official implementation in Python Ops.
 
 Any contributions to this repo is welcomed.
 
