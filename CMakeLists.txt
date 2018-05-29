@@ -67,12 +67,12 @@ LINK_DIRECTORIES(${TF_LIB})
 
 
 # approach 2
-CUDA_COMPILE(PSROI_ALIGN_CU_O l_softmax_op.cu MODULE OPTIONS -I$TF_INC -I/usr/local)
-CUDA_COMPILE(PSROI_ALIGN_GRAD_CU_O l_softmax_grad_op.cu MODULE OPTIONS -I$TF_INC -I/usr/local)
+CUDA_COMPILE(L_SOFTMAX_CU_O l_softmax_op.cu MODULE OPTIONS -I$TF_INC -I/usr/local)
+CUDA_COMPILE(L_SOFTMAX_GRAD_CU_O l_softmax_grad_op.cu MODULE OPTIONS -I$TF_INC -I/usr/local)
 
 ADD_LIBRARY(extra_losses SHARED
-  ${PSROI_ALIGN_CU_O}
-  ${PSROI_ALIGN_GRAD_CU_O}
+  ${L_SOFTMAX_CU_O}
+  ${L_SOFTMAX_GRAD_CU_O}
   l_softmax_op.h
   l_softmax_op.cc
   l_softmax_grad_op.cc

@@ -17,6 +17,7 @@ If your goal is to reproduce the results in the original paper, please use the o
 - [Focal Loss in ICCV 2017](https://github.com/facebookresearch/Detectron)
 
 ## ##
+
 For using these Ops on your own machine:
 
 - copy the header file "cuda\_config.h" from "your\_python\_path/site-packages/external/local\_config\_cuda/cuda/cuda/cuda\_config.h" to "your\_python\_path/site-packages/tensorflow/include/tensorflow/stream\_executor/cuda/cuda\_config.h".
@@ -82,6 +83,8 @@ make
 	- For others just refer to this [script](https://github.com/HiKapok/tf.extra_losses/blob/master/py_loss.py).
 
 All the codes was tested under TensorFlow 1.6, Python 3.5, Ubuntu 16.04 with CUDA 8.0. The outputs of these Ops in C++ had been compared with the original caffe codes' outputs, and the bias could be ignored. The gradients of this Op had been checked using [tf.test.compute\_gradient\_error](https://www.tensorflow.org/api_docs/python/tf/test/compute_gradient_error) and [tf.test.compute\_gradient](https://www.tensorflow.org/api_docs/python/tf/test/compute_gradient). While the others are implemented following the official implementation in Python Ops.
+
+If you encountered some linkage problem when generating or loading *.so, you are highly recommended to read this section in the [official tourial](https://www.tensorflow.org/extend/adding_an_op#compile_the_op_using_your_system_compiler_tensorflow_binary_installation) to make sure you were using the same C++ ABI version.
 
 Any contributions to this repo is welcomed.
 
