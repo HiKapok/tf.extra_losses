@@ -226,7 +226,7 @@ template <typename Device, typename T>
 class LargeMarginSoftmaxGradOp : public OpKernel {
  public:
   explicit LargeMarginSoftmaxGradOp(OpKernelConstruction* context) : OpKernel(context) {
-    b_angular = StringPiece(type_string()).starts_with("Angular");
+    b_angular = string(type_string()).rfind("Angular", 0) == 0;
 
     OP_REQUIRES_OK(context, context->GetAttr("margin_order", &m_margin_order));
     OP_REQUIRES(context, m_margin_order > 0, errors::InvalidArgument("Need Attr margin_order >= 1, got ", m_margin_order));
